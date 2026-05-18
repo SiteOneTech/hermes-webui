@@ -231,14 +231,49 @@ def _webui_ephemeral_system_prompt(
 
 _SECRET_SHAPED_RE = re.compile(
     r"(?i)(api[_-]?key|token|password|secret)\s*[:=]\s*[^\s]+|"
+    r"\b(?:sk-[A-Za-z0-9_-]{16,}|ghp_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,})\b|"
     r"[A-Za-z0-9_-]{24,}\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}"
 )
+
+_PREFILL_SCRIPT_CACHE_TTL_SECONDS = 10.0
+_PREFILL_SCRIPT_CACHE_LOCK = threading.Lock()
+_PREFILL_SCRIPT_CACHE: dict[tuple[str, int], tuple[float, dict]] = {}
 
 
 def _redact_prefill_status_text(text: str) -> str:
     """Return a short, non-secret diagnostic string for prefill status."""
     clean = _SECRET_SHAPED_RE.sub("[REDACTED]", str(text or ""))
     return " ".join(clean.split())[:240]
+
+
+def _prefill_script_env() -> dict[str, str]:
+    """Return the minimal environment inherited by configured prefill scripts."""
+    return {
+        "PATH": os.environ.get("PATH", ""),
+        "HOME": os.environ.get("HOME", ""),
+    }
+
+
+def _prefill_script_cache_get(cache_key: tuple[str, int], ttl: float) -> dict | None:
+    if ttl <= 0:
+        return None
+    now = time.monotonic()
+    with _PREFILL_SCRIPT_CACHE_LOCK:
+        cached = _PREFILL_SCRIPT_CACHE.get(cache_key)
+        if not cached:
+            return None
+        cached_at, result = cached
+        if now - cached_at > ttl:
+            _PREFILL_SCRIPT_CACHE.pop(cache_key, None)
+            return None
+        return copy.deepcopy(result)
+
+
+def _prefill_script_cache_put(cache_key: tuple[str, int], result: dict, ttl: float) -> None:
+    if ttl <= 0:
+        return
+    with _PREFILL_SCRIPT_CACHE_LOCK:
+        _PREFILL_SCRIPT_CACHE[cache_key] = (time.monotonic(), copy.deepcopy(result))
 
 
 def _valid_prefill_messages(value) -> list[dict]:
@@ -274,6 +309,7 @@ def _load_webui_prefill_context(
     python_exe: Optional[str] = None,
     env: Optional[dict] = None,
     timeout: float = 20.0,
+    script_cache_ttl: float = _PREFILL_SCRIPT_CACHE_TTL_SECONDS,
 ) -> dict:
     """Load configured WebUI session prefill messages.
 
@@ -281,6 +317,10 @@ def _load_webui_prefill_context(
     ``prefill_messages_script`` hook whose stdout becomes one user-role recall
     message. Script output is intentionally ephemeral: it is passed to the
     agent as prefill context and is not written into the session transcript.
+
+    File prefill is read directly each turn. Script prefill executes before SSE
+    output starts, so successful script results are cached briefly by path/mtime
+    to avoid re-shelling on every rapid browser turn.
     """
     cfg = config_data if isinstance(config_data, dict) else get_config()
     file_raw = os.getenv("HERMES_PREFILL_MESSAGES_FILE", "") or str(cfg.get("prefill_messages_file") or "")
@@ -300,6 +340,14 @@ def _load_webui_prefill_context(
         label = path.name or "prefill script"
         if not path.exists():
             return {"status": "error", "source": "script", "label": label, "messages": [], "message_count": 0, "error": "prefill script not found"}
+        try:
+            mtime_ns = path.stat().st_mtime_ns
+        except OSError as exc:
+            return {"status": "error", "source": "script", "label": label, "messages": [], "message_count": 0, "error": _redact_prefill_status_text(str(exc))}
+        cache_key = (str(path), mtime_ns)
+        cached = _prefill_script_cache_get(cache_key, script_cache_ttl)
+        if cached is not None:
+            return cached
         exe = python_exe or sys.executable
         cmd = [exe, str(path)] if path.suffix == ".py" else [str(path)]
         try:
@@ -320,7 +368,9 @@ def _load_webui_prefill_context(
         output = (proc.stdout or "").strip()
         messages = [{"role": "user", "content": output}] if output else []
         status = "loaded" if messages else "empty"
-        return {"status": status, "source": "script", "label": label, "messages": messages, "message_count": len(messages)}
+        result = {"status": status, "source": "script", "label": label, "messages": messages, "message_count": len(messages)}
+        _prefill_script_cache_put(cache_key, result, script_cache_ttl)
+        return result
     return {"status": "not_configured", "source": "none", "label": "", "messages": [], "message_count": 0}
 
 
@@ -3653,7 +3703,7 @@ def _run_agent_streaming(
             # Read per-profile config at call time (not module-level snapshot)
             from api.config import get_config as _get_config
             _cfg = _get_config()
-            _prefill_context = _load_webui_prefill_context(_cfg)
+            _prefill_context = _load_webui_prefill_context(_cfg, env=_prefill_script_env())
             _prefill_messages = _prefill_context.get('messages') or []
             put('context_status', {
                 'session_id': session_id,

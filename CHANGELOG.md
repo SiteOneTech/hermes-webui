@@ -5,7 +5,7 @@
 ### Added
 
 - Add non-sensitive SSE stream runtime diagnostics to deep health checks, including active stream count, subscriber totals, and offline buffered-event counts for stuck or slow WebUI chat investigations.
-- Add WebUI session prefill parity: browser-originated chat turns now load configured prefill context from `prefill_messages_file` or `prefill_messages_script`, pass it to Hermes Agent as ephemeral model context, and surface a compact context status event in the chat UI without exposing prefill message bodies.
+- Add WebUI session prefill parity: browser-originated chat turns now load configured prefill context from `prefill_messages_file` or `prefill_messages_script`, pass it to Hermes Agent as ephemeral model context, and surface a compact context status event in the chat UI without exposing prefill message bodies. File prefill is cheap to read each turn; script prefill runs before SSE output starts, inherits only a minimal `PATH`/`HOME` environment, and uses a short path/mtime TTL cache to avoid re-shelling during rapid browser turns.
 
 ### Changed
 
