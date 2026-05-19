@@ -1,6 +1,8 @@
 import importlib
 import queue
 
+from tests.conftest import requires_agent_modules
+
 
 def test_runtime_adapter_interface_and_legacy_journal_methods_exist():
     runtime = importlib.import_module("api.runtime_adapter")
@@ -270,6 +272,78 @@ def test_approval_respond_does_not_fallback_to_oldest_when_explicit_id_is_stale(
     stale_branch = helper_body[helper_body.index("else:", helper_body.index("for i, entry")):helper_body.index("else:\n                pending = queue.pop(0)")]
     assert "pending = None" in stale_branch
     assert "queue.pop(0)" not in stale_branch
+
+
+def test_approval_respond_peeks_gateway_queues_when_pending_empty() -> None:
+    """When _pending has no matching entry but _gateway_queues does, the
+    helper should extract pattern_keys from the gateway queue and call
+    approve_session even though pending is None.
+    """
+    routes = importlib.import_module("api.routes")
+    src = (routes.Path(__file__).parent.parent / "api" / "routes.py").read_text(encoding="utf-8")
+    helper_idx = src.index("def _resolve_approval_legacy")
+    helper_body = src[helper_idx:src.index("def _handle_approval_respond", helper_idx)]
+
+    assert "_gateway_queues" in helper_body, (
+        "_resolve_approval_legacy must reference _gateway_queues "
+        "to read pattern_keys when _pending is empty"
+    )
+    assert "gateway_keys" in helper_body, (
+        "Must extract pattern_keys from _gateway_queues into a gateway_keys variable"
+    )
+    assert "approve_session" in helper_body[helper_body.index("all_keys"):], (
+        "Must call approve_session for keys extracted from _gateway_queues"
+    )
+
+
+@requires_agent_modules
+def test_approval_respond_approves_from_gateway_queues_when_pending_empty() -> None:
+    """Verify _resolve_approval_legacy peeks into _gateway_queues for
+    pattern_keys when _pending has no matching entry, and calls
+    approve_session() even though pending is None (the real streaming case).
+    """
+    import threading
+    from api.routes import _resolve_approval_legacy
+
+    routes = importlib.import_module("api.routes")
+    approval_mod = importlib.import_module("tools.approval")
+
+    test_sid = "__test_gateway_approval_sid__"
+    test_key = "__test_pattern_key__"
+
+    # 1. Ensure _pending is empty for this sid
+    with approval_mod._lock:
+        approval_mod._pending.pop(test_sid, None)
+
+    # 2. Populate _gateway_queues with a real entry
+    entry = approval_mod._ApprovalEntry({
+        "command": "test_cmd",
+        "pattern_key": test_key,
+        "pattern_keys": [test_key],
+        "description": "test dangerous cmd",
+    })
+    with approval_mod._lock:
+        approval_mod._gateway_queues.setdefault(test_sid, []).append(entry)
+
+    try:
+        # 3. Run the helper with empty _pending but populated _gateway_queues
+        result = _resolve_approval_legacy(test_sid, "", "session")
+
+        # 4. Verify approve_session was called (is_approved must return True)
+        assert approval_mod.is_approved(test_sid, test_key), (
+            "approve_session should have been called for the pattern_key "
+            "extracted from _gateway_queues"
+        )
+        assert result is True, (
+            "_resolve_approval_legacy should return True when it finds "
+            "and resolves the gateway entry"
+        )
+    finally:
+        # 5. Cleanup
+        with approval_mod._lock:
+            approval_mod._gateway_queues.pop(test_sid, None)
+            approval_mod._session_approved.pop(test_sid, None)
+            approval_mod._pending.pop(test_sid, None)
 
 
 def test_chat_start_route_selects_adapter_only_when_flag_enabled():
