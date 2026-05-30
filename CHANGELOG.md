@@ -3,6 +3,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- OpenCode provider key lookup now honors the shared `OPENCODE_API_KEY` fallback for both Zen and Go runtime paths, matching model-picker detection when provider-specific keys are absent (#3145).
+
 ## [v0.51.165] — 2026-05-30 — Release EK (stage-batch47 — stop EventSource reconnect storm on long-lived SSE streams)
 
 ### Fixed
