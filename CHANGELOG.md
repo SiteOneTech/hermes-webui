@@ -3,6 +3,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Tool-call cards stay anchored when scrolling back through paginated history; legacy session-level tool-call indices are rebased to the returned message window and the browser refreshes tool-call anchors whenever a larger history window is loaded (#3120).
+
 ## [v0.51.171] — 2026-05-30 — Release EQ (stage-batch53 — tool-output card badge + Neon opt-in skin)
 
 ### Added

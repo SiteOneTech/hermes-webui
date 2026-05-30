@@ -92,7 +92,10 @@ def test_tail_window_keeps_only_visible_session_tool_calls_for_legacy_messages_w
     payload = _invoke(session)
 
     assert payload["messages"] == [session.messages[-1]]
-    assert payload["tool_calls"] == [session.tool_calls[-1]]
+    assert payload["tool_calls"] == [
+        {"name": "visible-tool", "snippet": "visible snippet", "assistant_msg_idx": 0}
+    ]
+    assert session.tool_calls[-1]["assistant_msg_idx"] == 1
 
 
 def test_full_load_keeps_all_session_tool_calls_for_legacy_messages_without_metadata():
@@ -129,5 +132,8 @@ def test_msg_before_window_keeps_only_that_page_session_tool_calls():
     )
 
     assert payload["messages"] == session.messages[1:3]
-    assert payload["tool_calls"] == [session.tool_calls[0]]
+    assert payload["tool_calls"] == [
+        {"name": "first-page-tool", "snippet": "kept", "assistant_msg_idx": 0}
+    ]
+    assert session.tool_calls[0]["assistant_msg_idx"] == 1
     assert payload["_messages_offset"] == 1
