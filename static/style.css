@@ -1012,7 +1012,7 @@
   .session-action-menu{display:block;position:fixed;left:0;top:0;right:auto;bottom:auto;min-width:220px;max-width:min(280px,calc(100vw - 16px));background:var(--surface);border:1px solid var(--border2);border-radius:10px;box-shadow:0 -4px 24px rgba(0,0,0,.4);z-index:999;overflow:hidden;max-height:calc(100vh - 16px);overflow-y:auto;transform-origin:top right;will-change:opacity,transform;}
   .session-action-menu.open-animated{animation:session-menu-in .45s cubic-bezier(.2,.8,.2,1);}
   .session-action-opt{width:100%;background:none;border:none;text-align:left;font:inherit;color:var(--text);flex-direction:row!important;gap:0!important;padding:0!important;}
-  .session-action-opt .ws-opt-action{display:flex;flex-direction:row;align-items:center;gap:10px;width:100%;padding:10px 14px;}
+  .session-action-opt .ws-opt-action{display:flex;flex-direction:row;align-items:center;gap:10px;width:100%;padding:8px 14px;}
   .session-action-opt .ws-opt-icon{color:var(--muted);transition:color .12s,opacity .12s;flex-shrink:0;display:flex;align-items:center;width:16px;}
   .session-action-opt:hover .ws-opt-icon{color:var(--text);opacity:1;}
   .session-action-copy{display:flex;flex-direction:column;gap:2px;min-width:0;}
@@ -1565,9 +1565,14 @@
      hover/focus-revealed Download button overlaid top-right. The image keeps
      its .msg-media-img lightbox-on-click behavior; no permanent card chrome —
      matches the ChatGPT/Claude/Gemini pattern of letting the image be the hero. */
-  .msg-artifact-image{position:relative;display:inline-block;vertical-align:bottom;margin:3px 4px 3px 0;}
-  .msg-artifact-image .msg-media-img{margin:0;display:block;}
-  .msg-artifact-download{position:absolute;top:6px;right:6px;width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;border-radius:7px;background:rgba(0,0,0,.55);color:#fff;text-decoration:none;opacity:0;transform:translateY(-2px);transition:opacity .12s,transform .12s,background .12s;pointer-events:none;}
+  .msg-artifact-image{position:relative;display:inline-block;vertical-align:bottom;margin:6px 4px 6px 0;}
+  /* Generated images are the subject of the message, not a small attachment
+     thumbnail — render them prominently at natural aspect ratio (the base
+     .msg-media-img is a cropped 120x90 upload thumbnail). Capped + responsive so
+     they never overflow the message column or a mobile viewport. Lightbox-on-click
+     (cursor:zoom-in) is preserved. */
+  .msg-artifact-image .msg-media-img{margin:0;display:block;width:auto;height:auto;max-width:min(360px,100%);max-height:360px;object-fit:contain;border-radius:8px;cursor:zoom-in;}
+  .msg-artifact-download{position:absolute;top:8px;right:8px;width:28px;height:28px;display:inline-flex;align-items:center;justify-content:center;border-radius:8px;background:rgba(0,0,0,.55);color:#fff;text-decoration:none;opacity:0;transform:translateY(-2px);transition:opacity .12s,transform .12s,background .12s;pointer-events:none;}
   .msg-artifact-image:hover .msg-artifact-download,.msg-artifact-image:focus-within .msg-artifact-download{opacity:1;transform:translateY(0);pointer-events:auto;}
   .msg-artifact-download:hover{background:rgba(0,0,0,.78);}
   .msg-artifact-download:focus-visible{opacity:1;pointer-events:auto;outline:2px solid var(--accent-bg-strong);outline-offset:1px;}

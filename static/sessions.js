@@ -2061,12 +2061,17 @@ function _buildSessionAction(label, meta, icon, onSelect, extraClass=''){
   const opt=document.createElement('button');
   opt.type='button';
   opt.className='ws-opt session-action-opt'+(extraClass?` ${extraClass}`:'');
+  // Compact context-menu shape (#3223 redesign, Nathan 2026-06-01): show only
+  // icon + label, matching VS Code / browser / ChatGPT conversation menus. The
+  // descriptive `meta` is preserved as a hover tooltip (title=) so the
+  // information stays discoverable without consuming permanent vertical space —
+  // this also keeps the menu short enough to avoid viewport clipping.
+  if(meta) opt.title=meta;
   opt.innerHTML=
     `<span class="ws-opt-action">`
       + `<span class="ws-opt-icon">${icon}</span>`
       + `<span class="session-action-copy">`
         + `<span class="ws-opt-name">${esc(label)}</span>`
-        + (meta?`<span class="session-action-meta">${esc(meta)}</span>`:'')
       + `</span>`
     + `</span>`;
   opt.onclick=async(e)=>{
