@@ -30,6 +30,10 @@ from api.agent_sessions import (
 
 logger = logging.getLogger(__name__)
 CLI_VISIBLE_SESSION_LIMIT = 20
+# WebUI-origin rows in Hermes state.db are first-party sidebar history, not
+# external CLI rows. Keep a wider recent window so lost/missing sidecars are
+# discoverable without enabling the external-session toggle.
+WEBUI_STATE_SESSION_LIMIT = 200
 # How many messageful cron sessions to surface in the project-chip layer.
 # Needs to exceed CLI_VISIBLE_SESSION_LIMIT so older cron runs stay
 # addressable even when many newer non-cron sessions dominate the default
@@ -3697,6 +3701,124 @@ def _load_cli_sessions_uncached(hermes_home: Path, db_path: Path, _cli_profile) 
         logger.debug("Cron project-chip second pass failed", exc_info=True)
 
     return cli_sessions
+
+
+def _load_state_webui_sessions_uncached(hermes_home: Path, db_path: Path, active_profile) -> list:
+    """Return WebUI-origin state.db rows as first-party sidebar sessions.
+
+    WebUI persists local JSON sidecars, but Hermes Agent also mirrors WebUI
+    conversations into state.db for insights and cross-surface history. Missing
+    or stale sidecars must not make first-party WebUI history disappear from the
+    sidebar, and this recovery path must not depend on the external CLI toggle.
+    """
+    if not db_path.exists():
+        return []
+
+    recovered = []
+    for row in read_importable_agent_session_rows(
+        db_path,
+        limit=WEBUI_STATE_SESSION_LIMIT,
+        log=logger,
+        exclude_sources=None,
+        include_sources=("webui",),
+    ):
+        sid = row['id']
+        raw_ts = row.get('last_activity') or row.get('started_at')
+        _title = row.get('title')
+        _workspace = str(get_last_workspace())
+        _pinned = False
+        _archived = False
+        _project_id = None
+        try:
+            _webui_meta = Session.load_metadata_only(sid)
+            if _webui_meta:
+                if getattr(_webui_meta, 'title', None):
+                    _title = _webui_meta.title
+                _workspace = getattr(_webui_meta, 'workspace', None) or _workspace
+                _pinned = bool(getattr(_webui_meta, 'pinned', False))
+                _archived = bool(getattr(_webui_meta, 'archived', False))
+                _project_id = getattr(_webui_meta, 'project_id', None)
+        except Exception:
+            pass
+        recovered.append({
+            'session_id': sid,
+            'title': _title or 'WebUI Session',
+            'workspace': _workspace,
+            'model': row.get('model') or None,
+            'message_count': row.get('actual_message_count') or row.get('message_count') or 0,
+            'created_at': row.get('started_at'),
+            'updated_at': raw_ts,
+            'pinned': _pinned,
+            'archived': _archived,
+            'project_id': _project_id,
+            'profile': active_profile or 'default',
+            'source_tag': 'webui',
+            'raw_source': row.get('raw_source') or 'webui',
+            'user_id': row.get('user_id'),
+            'chat_id': row.get('chat_id') or row.get('origin_chat_id'),
+            'chat_type': row.get('chat_type'),
+            'thread_id': row.get('thread_id'),
+            'session_key': row.get('session_key'),
+            'platform': row.get('platform'),
+            'session_source': 'webui',
+            'source_label': row.get('source_label') or 'WebUI',
+            'parent_session_id': row.get('parent_session_id'),
+            'parent_title': row.get('parent_title'),
+            'parent_source': row.get('parent_source'),
+            'relationship_type': row.get('relationship_type'),
+            '_parent_lineage_root_id': row.get('_parent_lineage_root_id'),
+            'end_reason': row.get('end_reason'),
+            'actual_message_count': row.get('actual_message_count'),
+            'user_message_count': row.get('actual_user_message_count'),
+            '_lineage_root_id': row.get('_lineage_root_id'),
+            '_lineage_tip_id': row.get('_lineage_tip_id'),
+            '_compression_segment_count': row.get('_compression_segment_count'),
+            'is_cli_session': False,
+        })
+    return recovered
+
+
+def get_state_webui_sessions() -> list:
+    """Read WebUI-origin state.db history for the sidebar.
+
+    This is intentionally separate from get_cli_sessions(): hiding external CLI
+    sessions must never hide first-party WebUI chat history.
+    """
+    hermes_home, db_path, active_profile, cache_key = _resolve_cli_sessions_context()
+    cache_key = (*cache_key, 'state-webui')
+    ttl = _cli_sessions_cache_ttl_seconds()
+    now = time.monotonic()
+
+    if ttl > 0:
+        with _CLI_SESSIONS_CACHE_LOCK:
+            cached = _CLI_SESSIONS_CACHE.get(cache_key)
+            if cached:
+                expires_at, cached_sessions = cached
+                if expires_at > now:
+                    return _copy_cli_sessions(cached_sessions)
+                _CLI_SESSIONS_CACHE.pop(cache_key, None)
+            try:
+                sessions = _load_state_webui_sessions_uncached(hermes_home, db_path, active_profile)
+            except Exception as _webui_err:
+                logger.warning(
+                    "get_state_webui_sessions() failed — check state.db schema or path (%s): %s",
+                    db_path, _webui_err,
+                )
+                return []
+            _CLI_SESSIONS_CACHE[cache_key] = (
+                time.monotonic() + ttl,
+                _copy_cli_sessions(sessions),
+            )
+            return _copy_cli_sessions(sessions)
+
+    try:
+        return _load_state_webui_sessions_uncached(hermes_home, db_path, active_profile)
+    except Exception as _webui_err:
+        logger.warning(
+            "get_state_webui_sessions() failed — check state.db schema or path (%s): %s",
+            db_path, _webui_err,
+        )
+        return []
 
 
 def get_cli_sessions() -> list:

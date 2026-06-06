@@ -2983,6 +2983,7 @@ from api.models import (
     save_projects,
     import_cli_session,
     get_cli_sessions,
+    get_state_webui_sessions,
     get_cli_session_messages,
     get_state_db_session_messages,
     get_state_db_session_summary,
@@ -5403,6 +5404,17 @@ def handle_get(handler, parsed) -> bool:
             settings = load_settings()
             show_cli_sessions = bool(settings.get("show_cli_sessions"))
             webui_sessions = [_normalize_sidebar_source_flags(s) for s in webui_sessions]
+            diag.stage("get_state_webui_sessions")
+            state_webui_sessions = [_normalize_sidebar_source_flags(s) for s in get_state_webui_sessions()]
+            if state_webui_sessions:
+                represented_webui_ids = set()
+                for s in webui_sessions:
+                    represented_webui_ids.update(_session_lineage_ids(s))
+                for s in state_webui_sessions:
+                    if _is_duplicate_webui_state_projection(s, represented_webui_ids):
+                        continue
+                    webui_sessions.append(s)
+                    represented_webui_ids.update(_session_lineage_ids(s))
             if show_cli_sessions:
                 diag.stage("get_cli_sessions")
                 cli = get_cli_sessions()
